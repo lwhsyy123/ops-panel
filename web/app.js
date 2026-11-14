@@ -116,6 +116,7 @@ async function renderOverview() {
     '<div class="grid">' + kpiCards + '</div>' +
     '<div class="card" style="margin-top:14px"><div class="svc">' +
     '<div class="name">' + (d.nginx && d.nginx.active ? '<span class="dot ok"></span>nginx 运行中' : '<span class="dot err"></span>nginx 未运行') +
+    (d.nginx && d.nginx.version ? '<span class="hint" style="margin-left:10px">v' + esc(d.nginx.version) + '</span>' : '') +
     '<span class="hint" style="margin-left:10px">证书 ' + (d.certs || []).length + ' 张</span></div>' +
     '<button class="sm" data-nginx-reload="1">重载配置</button></div></div>' +
     '<h1 style="font-size:16px;margin-top:22px">站点服务</h1>' +
@@ -182,7 +183,8 @@ async function renderServer() {
     '<div class="card"><h3>NGINX</h3><div class="svc"><div class="name">' +
     (d.nginx && d.nginx.active ? '<span class="dot ok"></span>运行中' : '<span class="dot err"></span>未运行') +
     '</div><button class="sm" id="nginxReload">重载配置</button></div>' +
-    '<div class="meta"><span>应用 <b>' + (d.apps || []).length + '</b> 个</span>' +
+    '<div class="meta"><span>版本 <b>' + esc(d.nginx && d.nginx.version ? d.nginx.version : '—') + '</b></span>' +
+    '<span>应用 <b>' + (d.apps || []).length + '</b> 个</span>' +
     '<span>证书 <b>' + (d.certs || []).length + '</b> 张</span></div></div>' +
     '<div class="card"><h3>入口</h3><div class="meta"><span>站点、证书、服务都在「站点」页按站点管理</span></div>' +
     '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/sites">去站点配置</a></div></div>' +

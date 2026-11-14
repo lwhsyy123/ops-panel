@@ -282,6 +282,12 @@ def nginx_status():
     return out == "active"
 
 
+def nginx_version():
+    rc, out, err = run([CFG["nginx"]["bin"], "-v"], timeout=10)
+    m = re.search(r"nginx/([\w.\-]+)", (err or out or ""))
+    return m.group(1) if m else ""
+
+
 def nginx_test():
     rc, out, err = run([CFG["nginx"]["bin"], "-t"], timeout=30)
     return rc == 0, (out + "\n" + err).strip()
@@ -1979,7 +1985,7 @@ class Handler(BaseHTTPRequestHandler):
             "services": services,
             "apps": [{"id": a["id"], "name": a["name"], "unit": a["unit"],
                       "path": a["path"], "url": a.get("url", "")} for a in CFG["apps"]],
-            "nginx": {"active": nginx_status()},
+            "nginx": {"active": nginx_status(), "version": nginx_version()},
             "metrics": metrics,
             "disk": {"total": disk.total, "used": disk.used, "free": disk.free,
                      "percent": round(disk.used / disk.total * 100, 1)},
