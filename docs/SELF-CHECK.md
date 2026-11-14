@@ -11,6 +11,12 @@
 | 前端语法 | JavaScriptCore 解析 app.js | 通过 |
 | Shell 语法 | `bash -n install.sh deploy.sh bootstrap.sh demo/demo.sh` | 通过 |
 | 登录 / 会话 | curl 登录、未登录跳转 | 通过 |
+| 2FA 启用 | 生成 TOTP、6 位码确认、8 个恢复码 | 通过 |
+| 2FA 登录 | 无码 401、有码 200 | 通过 |
+| 恢复码 | 一次性使用、剩余数量递减、复用 401 | 通过 |
+| 关闭 2FA | 密码 + 动态码 | 通过 |
+| HTTPS 直连 | 自签证书 + tls_cert/tls_key | 通过 |
+| 北京时间 | 面板时间戳 +08、与系统一致 | 通过 |
 | 概览指标 | CPU/内存/负载/磁盘/网络/运行时长 | 通过（演示数据） |
 | 站点列表 | 域名、服务、证书、部署关联 | 通过 |
 | 站点预览 | /api/sites/preview 生成 80+443 | 通过 |
@@ -35,6 +41,8 @@
 | 真实 systemd 启停 | 本机无 systemd | 先在 VPS 上点一次「重启」，看 journal |
 | 真实 nginx -t / reload | 本机无 nginx | 先点「仅校验」，再保存一个小改动 |
 | 真实 ufw | 本机无 ufw | 先 `ufw status`，启用前确认 22/tcp 已放行 |
+| 直连 0.0.0.0 公网访问 | 需真实公网环境 | 开 2FA + 防火墙白名单后再改 bind |
+| Cloudflare Tunnel | 需 CF 账号与域名 | 按 DEPLOY.md 第五节 D 配置 |
 | install.sh | 需要 root + systemd | 在 VPS 上首次安装时观察输出 |
 | RHEL 系兼容 | 未测 | 需 firewalld 支持，当前只支持 ufw |
 
@@ -42,8 +50,10 @@
 
 1. VPS 快照 / 备份 `/etc/nginx`
 2. 安装后先看概览，确认服务与证书数据真实
-3. 站点页点「仅校验」
-4. 改一个小配置保存，确认 reload 正常
-5. 发一次部署，确认自动备份与回滚可用
-6. 配好 RemindHub，点「测试推送」
-7. 防火墙启用前保留另一个 SSH 会话
+3. **先启用 2FA 并保存恢复码**
+4. 站点页点「仅校验」
+5. 改一个小配置保存，确认 reload 正常
+6. 发一次部署，确认自动备份与回滚可用
+7. 配好 RemindHub，点「测试推送」
+8. 防火墙启用前保留另一个 SSH 会话
+9. 决定访问方式：SSH 隧道 / nginx 反代 / 直连 / Cloudflare Tunnel

@@ -20,6 +20,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if command -v timedatectl >/dev/null 2>&1; then
+  timedatectl set-timezone Asia/Shanghai >/dev/null 2>&1 || true
+  echo "时区：$(timedatectl show -p Timezone --value 2>/dev/null || echo unknown)"
+fi
+
 command -v python3 >/dev/null 2>&1 || { echo "缺少 python3" >&2; exit 1; }
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' \
   || { echo "需要 Python 3.8 及以上" >&2; exit 1; }
@@ -63,6 +68,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/ops-panel
 ExecStart=/usr/bin/python3 /opt/ops-panel/panel.py --config /etc/ops-panel/config.json
+Environment=TZ=Asia/Shanghai
 Restart=always
 RestartSec=3
 

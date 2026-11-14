@@ -110,13 +110,24 @@ bash /root/ops-panel/install.sh
 
 安装完会打印：面板密码、部署令牌、隧道命令。密码同时存在 `/root/.ops-panel-password`。
 
-## 访问（只开本机，不走公网）
+## 访问（四选一）
+
+| 方式 | 适用 |
+|---|---|
+| SSH 隧道 | 默认，最安全，不开任何端口 |
+| nginx 反代 + HTTPS | 想直接用域名打开，面板仍留本机 |
+| 直连 IP:9100 | 不推荐；需 2FA + TLS + IP 白名单 |
+| Cloudflare Tunnel + Access | 不开端口、带邮箱验证、手机可用 |
+
+详细步骤（含 nginx 配置、cloudflared 命令、Access 策略）见 [DEPLOY.md 第五节](DEPLOY.md)。
+
+SSH 隧道最短路径：
 
 ```bash
 ssh -N -L 9100:127.0.0.1:9100 root@<IP>
 ```
 
-浏览器打开 `http://127.0.0.1:9100`。关掉隧道即断开，面板端口对公网不可见。
+浏览器打开 `http://127.0.0.1:9100`。
 
 ## 部署
 
@@ -142,8 +153,10 @@ OPS_HOST=root@<IP> OPS_TOKEN=<令牌> ~/ops-panel/deploy.sh my-site .
 
 ## 安全设计
 
-- 只监听 `127.0.0.1`，没有公网入口
-- 密码 PBKDF2-SHA256（20 万次），会话 Cookie `HttpOnly + SameSite=Strict`
+- 默认只监听 `127.0.0.1`；要公网访问推荐 nginx 反代 + HTTPS 或 Cloudflare Tunnel（见 DEPLOY.md）
+- 密码 PBKDF2-SHA256（20 万次），支持 TOTP 两步验证 + 8 个一次性恢复码
+- 会话 Cookie `HttpOnly + SameSite=Strict`
+- 所有时间戳统一北京时间（Asia/Shanghai）
 - 登录失败 5 次锁 5 分钟
 - 所有写操作要求 `X-Ops: 1` 头（CSRF）
 - 站点编辑：先备份 → 写临时文件 → `nginx -t` → 失败还原

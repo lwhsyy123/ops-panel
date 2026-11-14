@@ -10,6 +10,7 @@ ops-panel — 一台 VPS 一个面板：Nginx 站点/证书 + systemd 服务 + �
 """
 
 import argparse
+import base64
 import hashlib
 import hmac
 import json
@@ -17,6 +18,7 @@ import os
 import re
 import secrets
 import shutil
+import struct
 import subprocess
 import tarfile
 import tempfile
@@ -25,7 +27,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -48,8 +50,22 @@ SESSION_TTL = 8 * 3600
 # --------------------------------------------------------------------------
 # 基础工具
 # --------------------------------------------------------------------------
+try:
+    from zoneinfo import ZoneInfo
+    BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+except Exception:
+    BEIJING_TZ = None
+
+
+def now_dt():
+    """统一使用北京时间，不受服务器时区影响。"""
+    if BEIJING_TZ is not None:
+        return datetime.now(BEIJING_TZ)
+    return datetime.now(timezone(timedelta(hours=8)))
+
+
 def now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_dt().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def run(cmd, timeout=120, input_text=None):
@@ -84,6 +100,11 @@ def load_config(path):
     cfg.setdefault("bind", "127.0.0.1")
     cfg.setdefault("port", 9100)
     cfg.setdefault("max_upload_mb", 300)
+    cfg.setdefault("totp_enabled", False)
+    cfg.setdefault("totp_secret", "")
+    cfg.setdefault("totp_recovery", [])
+    cfg.setdefault("tls_cert", "")
+    cfg.setdefault("tls_key", "")
     cfg.setdefault("certs_dir", "/etc/ssl/cloudflare")
     cfg.setdefault("backup_dir", "/var/backups/ops-panel")
     cfg.setdefault("state_dir", "/var/lib/ops-panel")
@@ -152,6 +173,53 @@ def verify_password(pw, stored):
         return hmac.compare_digest(dk.hex(), hash_hex)
     except Exception:
         return False
+
+
+def gen_totp_secret():
+    raw = secrets.token_bytes(20)
+    return base64.b32encode(raw).decode().rstrip("=")
+
+
+def totp_code(secret, offset=0, step=30):
+    pad = "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(secret + pad)
+    counter = int(time.time() // step) + offset
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    pos = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[pos:pos + 4])[0] & 0x7FFFFFFF
+    return "%06d" % (value % 1000000)
+
+
+def verify_totp(secret, code):
+    code = str(code or "").replace(" ", "").strip()
+    if not secret or not code.isdigit() or len(code) != 6:
+        return False
+    return any(hmac.compare_digest(totp_code(secret, offset=o), code) for o in (-1, 0, 1))
+
+
+def otpauth_uri(secret, account="admin", issuer="ops-panel"):
+    from urllib.parse import quote
+    label = quote("%s:%s" % (issuer, account))
+    return ("otpauth://totp/%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=30"
+            % (label, secret, quote(issuer)))
+
+
+def recovery_hashes(codes):
+    return [hashlib.sha256(c.strip().upper().encode()).hexdigest() for c in codes]
+
+
+def consume_recovery(code):
+    code = str(code or "").strip().upper()
+    if not code:
+        return False
+    h = hashlib.sha256(code.encode()).hexdigest()
+    items = CFG.get("totp_recovery") or []
+    if h in items:
+        items.remove(h)
+        CFG["totp_recovery"] = items
+        save_config()
+        return True
+    return False
 
 
 def new_session():
@@ -1661,6 +1729,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_firewall()
             if path == "/api/settings":
                 return self._api_settings()
+            if path == "/api/security":
+                return self._api_security()
             if path == "/api/monitor":
                 return self._api_monitor()
             if path == "/api/certs":
@@ -1705,6 +1775,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_app_import()
             if path == "/api/settings":
                 return self._api_settings_save()
+            if path == "/api/security/setup":
+                return self._api_security_setup()
+            if path == "/api/security/enable":
+                return self._api_security_enable()
+            if path == "/api/security/disable":
+                return self._api_security_disable()
             if path == "/api/monitor/config":
                 return self._api_monitor_config()
             if path == "/api/monitor/test":
@@ -1802,6 +1878,13 @@ class Handler(BaseHTTPRequestHandler):
                 FAILS[ip] = [rec[0] + 1, time.time()]
             audit("login", "密码错误", ok=False)
             return self._json({"ok": False, "error": "密码错误"}, 401)
+        if CFG.get("totp_enabled"):
+            code = str(data.get("code") or "").strip()
+            if not verify_totp(CFG.get("totp_secret"), code) and not consume_recovery(code):
+                with FAILS_LOCK:
+                    FAILS[ip] = [rec[0] + 1, time.time()]
+                audit("login", "动态验证码错误", ok=False)
+                return self._json({"ok": False, "error": "动态验证码错误"}, 401)
         with FAILS_LOCK:
             FAILS.pop(ip, None)
         token = new_session()
@@ -2037,6 +2120,43 @@ class Handler(BaseHTTPRequestHandler):
             "apps": len(CFG.get("apps", [])),
         })
 
+    def _api_security(self):
+        if not self._require():
+            return
+        return self._json({"ok": True,
+                           "enabled": bool(CFG.get("totp_enabled")),
+                           "recovery_left": len(CFG.get("totp_recovery") or [])})
+
+    def _api_security_setup(self):
+        secret = gen_totp_secret()
+        return self._json({"ok": True, "secret": secret, "uri": otpauth_uri(secret)})
+
+    def _api_security_enable(self):
+        d = self._body()
+        secret = (d.get("secret") or "").strip()
+        if not verify_totp(secret, d.get("code", "")):
+            return self._json({"ok": False, "error": "验证码不对，请确认手机时间准确"}, 400)
+        codes = [secrets.token_hex(4).upper() for _ in range(8)]
+        CFG["totp_enabled"] = True
+        CFG["totp_secret"] = secret
+        CFG["totp_recovery"] = recovery_hashes(codes)
+        save_config()
+        audit("security.2fa", "enabled")
+        return self._json({"ok": True, "recovery": codes})
+
+    def _api_security_disable(self):
+        d = self._body()
+        if not verify_password(d.get("password", ""), CFG["password_hash"]):
+            return self._json({"ok": False, "error": "密码错误"}, 401)
+        if not verify_totp(CFG.get("totp_secret"), d.get("code", "")) and not consume_recovery(d.get("code", "")):
+            return self._json({"ok": False, "error": "动态验证码错误"}, 401)
+        CFG["totp_enabled"] = False
+        CFG["totp_secret"] = ""
+        CFG["totp_recovery"] = []
+        save_config()
+        audit("security.2fa", "disabled")
+        return self._json({"ok": True})
+
     def _api_settings_save(self):
         d = self._body()
         if "max_upload_mb" in d:
@@ -2194,7 +2314,16 @@ def main():
 
     srv = ThreadingHTTPServer((CFG["bind"], CFG["port"]), Handler)
     srv.daemon_threads = True
-    print("ops-panel listening on http://%s:%d" % (CFG["bind"], CFG["port"]))
+    scheme = "http"
+    if CFG.get("tls_cert") and CFG.get("tls_key"):
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(CFG["tls_cert"], CFG["tls_key"])
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        scheme = "https"
+    if CFG["bind"] not in ("127.0.0.1", "localhost", "::1"):
+        print("WARNING: 面板监听在 %s，公网可达，请确保已开启 2FA 与 HTTPS" % CFG["bind"])
+    print("ops-panel listening on %s://%s:%d" % (scheme, CFG["bind"], CFG["port"]))
     audit("start", "ops-panel 启动")
     try:
         srv.serve_forever()

@@ -11,6 +11,11 @@
   "default_owner": "www-data:www-data",
   "metrics_demo": false,
   "max_upload_mb": 300,
+  "totp_enabled": false,
+  "totp_secret": "",
+  "totp_recovery": [],
+  "tls_cert": "",
+  "tls_key": "",
   "nginx": {
     "bin": "nginx",
     "sites_enabled": "/etc/nginx/sites-enabled",

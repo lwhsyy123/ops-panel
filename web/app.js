@@ -146,6 +146,7 @@ async function renderServer() {
   const d = await api('/api/overview');
   const fw = await api('/api/firewall');
   const st = await api('/api/settings');
+  const sec = await api('/api/security');
   if (!d.ok) { $('#main').innerHTML = '<h1>服务器</h1><div class="sub">' + esc(d.error) + '</div>'; return; }
 
   /* 防火墙 */
@@ -189,6 +190,20 @@ async function renderServer() {
     '<input type="text" id="setUpload" value="' + esc(st.max_upload_mb) + '" style="width:100px">' +
     '<button class="sm primary" id="saveSettings">保存</button></div>' +
     '<div class="hint">部署包和源码包共用这个上限，保存后立即生效。</div></div>' +
+    '<div class="card" style="margin-top:14px"><h3>安全 / 两步验证</h3>' +
+    (sec.enabled
+      ? '<div class="svc"><div class="name"><span class="dot ok"></span>两步验证已开启</div>' +
+        '<button class="sm danger" id="disable2fa">关闭</button></div>' +
+        '<div class="hint">恢复码剩余 ' + esc(sec.recovery_left) + ' 个。公网访问时请保持开启。</div>'
+      : '<div class="hint">开启后登录需要「密码 + 6 位动态码」。如果要让面板直接暴露公网，这一项必须开。</div>' +
+        '<div class="row"><button class="sm primary" id="enable2fa">启用两步验证</button></div>' +
+        '<div id="tfaBox" style="display:none;margin-top:10px">' +
+        '<div class="hint">在 Google Authenticator / 1Password / 微软验证器里手动添加这个密钥（TOTP）：</div>' +
+        '<pre class="log" id="tfaSecret" style="height:auto;max-height:80px"></pre>' +
+        '<div class="hint mono" id="tfaUri" style="word-break:break-all"></div>' +
+        '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric">' +
+        '<button class="sm primary" id="confirm2fa">确认启用</button></div></div>') +
+    '</div>' +
     '<div class="card" style="margin-top:14px"><h3>发现</h3>' +
     '<div class="row"><button class="sm primary" id="scanBtn">扫描本机</button>' +
     '<span class="hint">站点 / 运行中的 /var/www 服务 / 证书，可一键纳管</span></div>' +
@@ -230,6 +245,37 @@ async function renderServer() {
   });
 
   /* 发现 handlers */
+  const enable2fa = $('#enable2fa');
+  if (enable2fa) enable2fa.onclick = async () => {
+    const r = await api('/api/security/setup', { method: 'POST' });
+    if (!r.ok) { toast(r.error || '生成失败', 'err'); return; }
+    window.__tfaSecret = r.secret;
+    $('#tfaSecret').textContent = r.secret;
+    $('#tfaUri').textContent = r.uri;
+    $('#tfaBox').style.display = 'block';
+  };
+  const confirm2fa = $('#confirm2fa');
+  if (confirm2fa) confirm2fa.onclick = async () => {
+    const r = await api('/api/security/enable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: window.__tfaSecret, code: $('#tfaCode').value.trim() }),
+    });
+    if (!r.ok) { toast(r.error, 'err'); return; }
+    alert('两步验证已开启。请保存下面 8 个恢复码（每个只能用一次）：\n\n' + r.recovery.join('\n'));
+    renderServer();
+  };
+  const disable2fa = $('#disable2fa');
+  if (disable2fa) disable2fa.onclick = async () => {
+    const pw = prompt('输入管理密码'); if (!pw) return;
+    const code = prompt('输入当前 6 位动态码（或用恢复码）'); if (!code) return;
+    const r = await api('/api/security/disable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw, code: code }),
+    });
+    toast(r.ok ? '已关闭两步验证' : (r.error || '失败'), r.ok ? 'ok' : 'err');
+    if (r.ok) renderServer();
+  };
+
   const saveSet = $('#saveSettings');
   if (saveSet) saveSet.onclick = async () => {
     const r = await api('/api/settings', {

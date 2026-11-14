@@ -12,6 +12,7 @@
     <h1>ops<span style="color:var(--accent)">panel</span></h1>
     <div class="sub">VPS 控制台 · 仅限本机隧道访问</div>
     <input type="password" id="pw" placeholder="管理密码" autocomplete="current-password" autofocus>
+    <input type="text" id="code" placeholder="动态验证码（开启 2FA 后必填）" inputmode="numeric" autocomplete="one-time-code" maxlength="10">
     <button class="primary" type="submit">进入</button>
     <div class="login-err" id="err"></div>
   </form>
@@ -24,7 +25,10 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   const res = await fetch('/api/login', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({password: document.getElementById('pw').value}),
+    body: JSON.stringify({
+      password: document.getElementById('pw').value,
+      code: document.getElementById('code').value.trim(),
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (res.ok && data.ok) { location.href = '/'; }
