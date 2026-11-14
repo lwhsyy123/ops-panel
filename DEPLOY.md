@@ -165,6 +165,13 @@ systemctl enable --now cloudflared
 
 开启后登录需要「密码 + 动态码」。关闭需要密码 + 动态码（或恢复码）。
 
+同一页还可以：
+
+- 修改密码：输入当前密码 + 新密码，保存后所有会话失效，需要重新登录
+- 重置部署令牌：输入当前密码确认，生成新令牌（只显示一次）；旧令牌立即失效，记得同步更新 deploy.sh 的 OPS_TOKEN
+
+部署令牌的用途：deploy.sh 调用 POST /api/deploy/<app> 时放在 X-Deploy-Token 头里，它是机器凭证，不是登录密码。
+
 ## 七、时区
 
 - `install.sh` 会自动执行 `timedatectl set-timezone Asia/Shanghai`

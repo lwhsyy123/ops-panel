@@ -155,6 +155,7 @@ OPS_HOST=root@<IP> OPS_TOKEN=<令牌> ~/ops-panel/deploy.sh my-site .
 
 - 默认只监听 `127.0.0.1`；要公网访问推荐 nginx 反代 + HTTPS 或 Cloudflare Tunnel（见 DEPLOY.md）
 - 密码 PBKDF2-SHA256（20 万次），支持 TOTP 两步验证 + 8 个一次性恢复码
+- 安全页可修改密码、重置部署令牌；改密码会踢掉所有会话
 - 会话 Cookie `HttpOnly + SameSite=Strict`
 - 所有时间戳统一北京时间（Asia/Shanghai）
 - 登录失败 5 次锁 5 分钟

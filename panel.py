@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
+VERSION = "1.3.0"
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE, "web")
 
@@ -1783,6 +1784,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_security_enable()
             if path == "/api/security/disable":
                 return self._api_security_disable()
+            if path == "/api/security/password":
+                return self._api_security_password()
+            if path == "/api/security/deploy-token":
+                return self._api_security_deploy_token()
             if path == "/api/monitor/config":
                 return self._api_monitor_config()
             if path == "/api/monitor/test":
@@ -2120,6 +2125,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         return self._json({
             "ok": True,
+            "version": VERSION,
             "max_upload_mb": int(CFG.get("max_upload_mb", 300)),
             "bind": CFG.get("bind"),
             "port": CFG.get("port"),
@@ -2129,9 +2135,36 @@ class Handler(BaseHTTPRequestHandler):
     def _api_security(self):
         if not self._require():
             return
-        return self._json({"ok": True,
+        token = CFG.get("deploy_token") or ""
+        hint = (token[:4] + "…" + token[-4:]) if len(token) >= 8 else ("已设置" if token else "未设置")
+        return self._json({"ok": True, "version": VERSION,
                            "enabled": bool(CFG.get("totp_enabled")),
-                           "recovery_left": len(CFG.get("totp_recovery") or [])})
+                           "recovery_left": len(CFG.get("totp_recovery") or []),
+                           "deploy_token_hint": hint})
+
+    def _api_security_password(self):
+        d = self._body()
+        if not verify_password(d.get("current", ""), CFG["password_hash"]):
+            return self._json({"ok": False, "error": "当前密码错误"}, 401)
+        new_pw = str(d.get("new") or "")
+        if len(new_pw) < 8:
+            return self._json({"ok": False, "error": "新密码至少 8 位"}, 400)
+        CFG["password_hash"] = hash_password(new_pw)
+        save_config()
+        with SESS_LOCK:
+            SESSIONS.clear()
+        audit("security.password", "changed")
+        return self._json({"ok": True})
+
+    def _api_security_deploy_token(self):
+        d = self._body()
+        if not verify_password(d.get("password", ""), CFG["password_hash"]):
+            return self._json({"ok": False, "error": "密码错误"}, 401)
+        token = secrets.token_hex(16)
+        CFG["deploy_token"] = token
+        save_config()
+        audit("security.token", "rotated")
+        return self._json({"ok": True, "token": token})
 
     def _api_security_setup(self):
         secret = gen_totp_secret()

@@ -146,7 +146,6 @@ async function renderServer() {
   const d = await api('/api/overview');
   const fw = await api('/api/firewall');
   const st = await api('/api/settings');
-  const sec = await api('/api/security');
   if (!d.ok) { $('#main').innerHTML = '<h1>服务器</h1><div class="sub">' + esc(d.error) + '</div>'; return; }
 
   /* 防火墙 */
@@ -190,20 +189,7 @@ async function renderServer() {
     '<input type="text" id="setUpload" value="' + esc(st.max_upload_mb) + '" style="width:100px">' +
     '<button class="sm primary" id="saveSettings">保存</button></div>' +
     '<div class="hint">部署包和源码包共用这个上限，保存后立即生效。</div></div>' +
-    '<div class="card" style="margin-top:14px"><h3>安全 / 两步验证</h3>' +
-    (sec.enabled
-      ? '<div class="svc"><div class="name"><span class="dot ok"></span>两步验证已开启</div>' +
-        '<button class="sm danger" id="disable2fa">关闭</button></div>' +
-        '<div class="hint">恢复码剩余 ' + esc(sec.recovery_left) + ' 个。公网访问时请保持开启。</div>'
-      : '<div class="hint">开启后登录需要「密码 + 6 位动态码」。如果要让面板直接暴露公网，这一项必须开。</div>' +
-        '<div class="row"><button class="sm primary" id="enable2fa">启用两步验证</button></div>' +
-        '<div id="tfaBox" style="display:none;margin-top:10px">' +
-        '<div class="hint">在 Google Authenticator / 1Password / 微软验证器里手动添加这个密钥（TOTP）：</div>' +
-        '<pre class="log" id="tfaSecret" style="height:auto;max-height:80px"></pre>' +
-        '<div class="hint mono" id="tfaUri" style="word-break:break-all"></div>' +
-        '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric">' +
-        '<button class="sm primary" id="confirm2fa">确认启用</button></div></div>') +
-    '</div>' +
+
     '<div class="card" style="margin-top:14px"><h3>发现</h3>' +
     '<div class="row"><button class="sm primary" id="scanBtn">扫描本机</button>' +
     '<span class="hint">站点 / 运行中的 /var/www 服务 / 证书，可一键纳管</span></div>' +
@@ -245,37 +231,6 @@ async function renderServer() {
   });
 
   /* 发现 handlers */
-  const enable2fa = $('#enable2fa');
-  if (enable2fa) enable2fa.onclick = async () => {
-    const r = await api('/api/security/setup', { method: 'POST' });
-    if (!r.ok) { toast(r.error || '生成失败', 'err'); return; }
-    window.__tfaSecret = r.secret;
-    $('#tfaSecret').textContent = r.secret;
-    $('#tfaUri').textContent = r.uri;
-    $('#tfaBox').style.display = 'block';
-  };
-  const confirm2fa = $('#confirm2fa');
-  if (confirm2fa) confirm2fa.onclick = async () => {
-    const r = await api('/api/security/enable', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret: window.__tfaSecret, code: $('#tfaCode').value.trim() }),
-    });
-    if (!r.ok) { toast(r.error, 'err'); return; }
-    alert('两步验证已开启。请保存下面 8 个恢复码（每个只能用一次）：\n\n' + r.recovery.join('\n'));
-    renderServer();
-  };
-  const disable2fa = $('#disable2fa');
-  if (disable2fa) disable2fa.onclick = async () => {
-    const pw = prompt('输入管理密码'); if (!pw) return;
-    const code = prompt('输入当前 6 位动态码（或用恢复码）'); if (!code) return;
-    const r = await api('/api/security/disable', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw, code: code }),
-    });
-    toast(r.ok ? '已关闭两步验证' : (r.error || '失败'), r.ok ? 'ok' : 'err');
-    if (r.ok) renderServer();
-  };
-
   const saveSet = $('#saveSettings');
   if (saveSet) saveSet.onclick = async () => {
     const r = await api('/api/settings', {
@@ -828,6 +783,93 @@ async function renderAlerts() {
   };
 }
 
+/* ------------------------------ 安全 ------------------------------ */
+async function renderSecurity() {
+  stopRefresh();
+  const sec = await api('/api/security');
+  const st = await api('/api/settings');
+  const ver = sec.version || st.version || '';
+
+  const tfa = sec.enabled
+    ? '<div class="svc"><div class="name"><span class="dot ok"></span>已开启</div>' +
+      '<button class="sm danger" id="disable2fa">关闭</button></div>' +
+      '<div class="hint">恢复码剩余 ' + esc(sec.recovery_left) + ' 个。公网访问时请保持开启。</div>'
+    : '<div class="hint">开启后登录需要「密码 + 6 位动态码」。如果要让面板直接暴露公网，这一项必须开。</div>' +
+      '<div class="row"><button class="sm primary" id="enable2fa">启用两步验证</button></div>' +
+      '<div id="tfaBox" style="display:none;margin-top:10px">' +
+      '<div class="hint">在 Google Authenticator / 1Password / 微软验证器里手动添加这个密钥（TOTP）：</div>' +
+      '<pre class="log" id="tfaSecret" style="height:auto;max-height:80px"></pre>' +
+      '<div class="hint mono" id="tfaUri" style="word-break:break-all"></div>' +
+      '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric">' +
+      '<button class="sm primary" id="confirm2fa">确认启用</button></div></div>';
+
+  $('#main').innerHTML = '<h1>安全</h1><div class="sub">密码 · 两步验证 · 部署令牌' +
+    (ver ? ' · v' + esc(ver) : '') + '</div>' +
+    '<div class="grid">' +
+    '<div class="card"><h3>修改密码</h3><div class="col">' +
+    '<input type="password" id="pwCur" placeholder="当前密码" autocomplete="current-password">' +
+    '<input type="password" id="pwNew" placeholder="新密码（至少 8 位）" autocomplete="new-password">' +
+    '<input type="password" id="pwNew2" placeholder="再输一次新密码" autocomplete="new-password">' +
+    '<div class="row"><button class="primary sm" id="savePw">保存</button></div></div></div>' +
+    '<div class="card"><h3>部署令牌</h3><div class="mono">' + esc(sec.deploy_token_hint) + '</div>' +
+    '<div class="hint">deploy.sh 用它调用部署接口，不是登录密码。泄露后在这里重置，旧令牌立即失效。</div>' +
+    '<div class="row"><button class="sm danger" id="rotateToken">重置令牌</button></div></div>' +
+    '</div>' +
+    '<div class="card" style="margin-top:14px"><h3>两步验证（2FA）</h3>' + tfa + '</div>';
+
+  $('#savePw').onclick = async () => {
+    const cur = $('#pwCur').value, np = $('#pwNew').value, np2 = $('#pwNew2').value;
+    if (!np || np !== np2) { toast('两次新密码不一致', 'err'); return; }
+    const r = await api('/api/security/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: cur, new: np }),
+    });
+    if (!r.ok) { toast(r.error || '修改失败', 'err'); return; }
+    alert('密码已修改，请重新登录');
+    location.href = '/login';
+  };
+  $('#rotateToken').onclick = async () => {
+    const pw = prompt('输入当前密码确认'); if (!pw) return;
+    const r = await api('/api/security/deploy-token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (!r.ok) { toast(r.error || '重置失败', 'err'); return; }
+    alert('新的部署令牌（只显示一次）：\n\n' + r.token + '\n\n记得更新 deploy.sh 的 OPS_TOKEN');
+  };
+
+  const enable2fa = $('#enable2fa');
+  if (enable2fa) enable2fa.onclick = async () => {
+    const r = await api('/api/security/setup', { method: 'POST' });
+    if (!r.ok) { toast(r.error || '生成失败', 'err'); return; }
+    window.__tfaSecret = r.secret;
+    $('#tfaSecret').textContent = r.secret;
+    $('#tfaUri').textContent = r.uri;
+    $('#tfaBox').style.display = 'block';
+  };
+  const confirm2fa = $('#confirm2fa');
+  if (confirm2fa) confirm2fa.onclick = async () => {
+    const r = await api('/api/security/enable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: window.__tfaSecret, code: $('#tfaCode').value.trim() }),
+    });
+    if (!r.ok) { toast(r.error, 'err'); return; }
+    alert('两步验证已开启。请保存下面 8 个恢复码（每个只能用一次）：\n\n' + r.recovery.join('\n'));
+    renderSecurity();
+  };
+  const disable2fa = $('#disable2fa');
+  if (disable2fa) disable2fa.onclick = async () => {
+    const pw = prompt('输入当前密码'); if (!pw) return;
+    const code = prompt('输入当前 6 位动态码（或用恢复码）'); if (!code) return;
+    const r = await api('/api/security/disable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw, code: code }),
+    });
+    toast(r.ok ? '已关闭两步验证' : (r.error || '失败'), r.ok ? 'ok' : 'err');
+    if (r.ok) renderSecurity();
+  };
+}
+
 /* ------------------------------ 日志 ------------------------------ */
 async function renderLogs(params) {
   stopRefresh();
@@ -882,6 +924,7 @@ async function route() {
   if (path === '/sites') { setActive('sites'); return renderSites(); }
   if (path === '/site') { setActive('sites'); return renderSiteEditor(params.get('name') || ''); }
   if (path === '/server') { setActive('server'); return renderServer(); }
+  if (path === '/security') { setActive('security'); return renderSecurity(); }
   if (path === '/deploy') { setActive('sites'); return renderDeploy(params); }
   if (path === '/alerts') { setActive('alerts'); return renderAlerts(); }
   if (path === '/logs') { setActive('logs'); return renderLogs(params); }
@@ -890,6 +933,9 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 window.addEventListener('load', () => {
+  api('/api/settings').then(s => {
+    if (s && s.ok) { const el = $('#appVer'); if (el) el.textContent = 'v' + s.version; }
+  }).catch(() => {});
   const lo = $('#logout');
   if (lo) lo.onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login'; };
   route();
