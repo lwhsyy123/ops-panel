@@ -106,7 +106,7 @@ ssh root@<IP>
 bash /root/ops-panel/install.sh
 ```
 
-完整的发布、首次配置、更新与卸载见 [DEPLOY.md](DEPLOY.md)。
+完整的发布、首次配置、更新与卸载见 [DEPLOY.md](DEPLOY.md)；本地自检结果见 [docs/SELF-CHECK.md](docs/SELF-CHECK.md)。
 
 安装完会打印：面板密码、部署令牌、隧道命令。密码同时存在 `/root/.ops-panel-password`。
 
