@@ -158,24 +158,44 @@ async function renderServer() {
   if (!fw.installed) {
     fwHtml = '<div class="hint">服务器上没有 ufw（apt install ufw 后刷新）。</div>';
   } else {
-    const ruleRows = (fw.rules || []).map(r =>
-      '<tr><td class="mono">' + esc(r.rule) + '</td>' +
-      '<td><button class="sm danger" data-delrule="' + esc(r.index) + '">删除</button></td></tr>'
-    ).join('') || '<tr><td colspan="2" class="hint">没有规则（默认允许出站、拒绝入站的话，SSH 22 必须先放行）</td></tr>';
+    const ruleRows = (fw.rules || []).map(r => {
+      const upper = r.rule.toUpperCase();
+      const action = upper.includes('DENY') || upper.includes('REJECT') ? '拒绝'
+        : upper.includes('LIMIT') ? '限速' : upper.includes('ALLOW') ? '允许' : '—';
+      const cls = action === '拒绝' ? 'err' : action === '限速' ? 'warn' : action === '允许' ? 'ok' : '';
+      return '<tr><td class="mono">' + esc(r.rule) + '</td>' +
+        '<td><span class="badge ' + cls + '">' + action + '</span></td>' +
+        '<td><button class="sm danger" data-delrule="' + esc(r.index) + '">删除</button></td></tr>';
+    }).join('') || '<tr><td colspan="3" class="hint">没有规则</td></tr>';
+
+    const sshPorts = fw.ssh_ports || [];
+    const sshMissing = fw.ssh_missing || [];
+    const sshHtml = sshPorts.length
+      ? '<div class="svc" style="margin-top:10px"><div class="name">SSH 端口：<b>' +
+        sshPorts.map(esc).join(', ') + '</b> ' +
+        (sshMissing.length ? '<span class="badge err">未放行</span>'
+          : (fw.active ? '<span class="badge ok">已放行</span>' : '<span class="badge">已配置</span>')) +
+        '</div>' +
+        (sshMissing.length ? '<button class="sm primary" id="sshAllow">放行 SSH</button>' : '') +
+        '</div>'
+      : '';
+
     fwHtml =
       '<div class="svc"><div class="name">' +
       (fw.active ? '<span class="dot ok"></span>ufw 已启用' : '<span class="dot warn"></span>ufw 未启用') +
       '</div><div class="row">' +
       '<button class="sm" id="fwToggle">' + (fw.active ? '停用防火墙' : '启用防火墙') + '</button>' +
       '<button class="sm primary" id="fwCloudflare">放行 Cloudflare (80/443)</button>' +
-      '</div></div>' +
-      '<table style="margin-top:10px"><thead><tr><th>规则</th><th></th></tr></thead><tbody>' + ruleRows + '</tbody></table>' +
-      '<div class="row" style="margin-top:10px">' +
+      '</div></div>' + sshHtml +
+      (fw.active ? '' : '<div class="hint" style="margin-top:6px">防火墙未启用，下面的规则暂不生效。</div>') +
+      '<table style="margin-top:10px"><thead><tr><th>规则</th><th>动作</th><th></th></tr></thead><tbody>' + ruleRows + '</tbody></table>' +
+      '<div class="row" style="margin-top:12px">' +
+      '<select id="fwAction"><option value="allow">允许</option><option value="deny">拒绝</option></select>' +
       '<input type="text" id="fwPort" placeholder="端口，如 22" style="width:110px">' +
       '<select id="fwProto"><option value="tcp">tcp</option><option value="udp">udp</option></select>' +
       '<input type="text" id="fwCidr" placeholder="来源 IP/CIDR（可空）" style="flex:1;min-width:180px">' +
       '<button class="sm primary" id="fwAdd">添加规则</button></div>' +
-      '<div class="hint">「放行 Cloudflare」会先确保 22/tcp 放行，再为 15 个 CF 网段加 80/443 入站规则；配合默认拒绝，即可锁死源站。</div>';
+      '<div class="hint">规则按序号删除；「放行 Cloudflare」会先确保 SSH 端口放行，再为 15 个 CF 网段加 80/443 入站。</div>';
   }
 
   $('#main').innerHTML = '<h1>服务器</h1><div class="sub">nginx · 防火墙 · 发现</div>' +
@@ -225,7 +245,14 @@ async function renderServer() {
   const fwAdd = $('#fwAdd');
   if (fwAdd) fwAdd.onclick = async () => {
     const r = await api('/api/firewall/add', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port: $('#fwPort').value.trim(), proto: $('#fwProto').value, cidr: $('#fwCidr').value.trim() }) });
+      body: JSON.stringify({ action: $('#fwAction').value, port: $('#fwPort').value.trim(),
+        proto: $('#fwProto').value, cidr: $('#fwCidr').value.trim() }) });
+    toast(r.ok ? r.message : (r.error || r.message), r.ok ? 'ok' : 'err');
+    if (r.ok) renderServer();
+  };
+  const sshAllow = $('#sshAllow');
+  if (sshAllow) sshAllow.onclick = async () => {
+    const r = await api('/api/firewall/ssh-allow', { method: 'POST' });
     toast(r.ok ? r.message : (r.error || r.message), r.ok ? 'ok' : 'err');
     if (r.ok) renderServer();
   };

@@ -82,10 +82,11 @@ case "$1" in
       n=$((n+1))
     done
     ;;
-  allow)
+  allow|deny)
+    action="$1"
     shift
     printf '%s
-' "$*" >> "$F"
+' "$action $*" >> "$F"
     echo "Rule added"
     ;;
   --force)

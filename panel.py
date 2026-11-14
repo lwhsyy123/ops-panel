@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
-VERSION = "1.3.6"
+VERSION = "1.3.7"
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE, "web")
 
@@ -1712,6 +1712,19 @@ CLOUDFLARE_V4 = [
 ]
 
 
+def ssh_ports():
+    rc, out, err = run(["sshd", "-T"], timeout=15)
+    ports = []
+    if rc == 0:
+        for line in (out or "").splitlines():
+            m = re.match(r"^port\s+(\d+)\s*$", line.strip())
+            if m:
+                ports.append(int(m.group(1)))
+    if not ports:
+        ports = [22]
+    return sorted(set(ports))
+
+
 def firewall_status():
     rc, out, err = run(["ufw", "status", "numbered"], timeout=30)
     installed = rc != 127
@@ -1724,26 +1737,44 @@ def firewall_status():
             m = re.match(r"\[\s*(\d+)\]\s+(.+)", line)
             if m:
                 rules.append({"index": int(m.group(1)), "rule": m.group(2).strip()})
-    return {"installed": installed, "active": active, "rules": rules}
+    ports = ssh_ports()
+    missing = []
+    for port in ports:
+        if not any(str(port) + "/tcp" in r["rule"] and "ALLOW" in r["rule"].upper()
+                   for r in rules):
+            missing.append(port)
+    return {"installed": installed, "active": active, "rules": rules,
+            "ssh_ports": ports, "ssh_missing": missing}
 
 
 def _ensure_ssh_rule():
     st = firewall_status()
-    if not any(r["rule"].startswith("22/") for r in st["rules"]):
-        run(["ufw", "allow", "22/tcp"], timeout=30)
+    for port in st.get("ssh_ports", [22]):
+        if not any(str(port) + "/tcp" in r["rule"] and "ALLOW" in r["rule"].upper()
+                   for r in st["rules"]):
+            run(["ufw", "allow", "%s/tcp" % port], timeout=30)
 
 
-def firewall_add(port, proto="tcp", cidr=None):
+def firewall_ssh_allow():
+    _ensure_ssh_rule()
+    st = firewall_status()
+    audit("firewall.ssh", "allow %s" % st.get("ssh_ports"))
+    return True, "已放行 SSH 端口：" + ", ".join(str(x) for x in st.get("ssh_ports", []))
+
+
+def firewall_add(port, proto="tcp", cidr=None, action="allow"):
     if not str(port).isdigit() or not 1 <= int(port) <= 65535:
         raise ValueError("端口不合法")
     if proto not in ("tcp", "udp"):
         raise ValueError("协议只支持 tcp/udp")
-    cmd = ["ufw", "allow"]
+    if action not in ("allow", "deny"):
+        raise ValueError("动作只支持 allow/deny")
+    cmd = ["ufw", action]
     if cidr:
         cmd += ["from", cidr]
     cmd += ["to", "any", "port", str(port), "proto", proto]
     rc, out, err = run(cmd, timeout=30)
-    audit("firewall.add", "%s %s %s" % (port, proto, cidr or ""), ok=rc == 0)
+    audit("firewall.add", "%s %s %s %s" % (action, port, proto, cidr or ""), ok=rc == 0)
     return rc == 0, (out + "\n" + err).strip()
 
 
@@ -1954,7 +1985,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_monitor_test()
             if path == "/api/firewall/add":
                 d = self._body()
-                ok, msg = firewall_add(d.get("port"), d.get("proto") or "tcp", d.get("cidr"))
+                ok, msg = firewall_add(d.get("port"), d.get("proto") or "tcp",
+                                       d.get("cidr"), d.get("action") or "allow")
                 return self._json({"ok": ok, "message": msg}, 200 if ok else 400)
             if path == "/api/firewall/delete":
                 d = self._body()
@@ -1964,6 +1996,9 @@ class Handler(BaseHTTPRequestHandler):
                 d = self._body()
                 ok, msg = firewall_set(bool(d.get("active")))
                 return self._json({"ok": ok, "message": msg}, 200 if ok else 400)
+            if path == "/api/firewall/ssh-allow":
+                ok, msg = firewall_ssh_allow()
+                return self._json({"ok": ok, "message": msg})
             if path == "/api/fail2ban/unban":
                 d = self._body()
                 ok, msg = fail2ban_unban((d.get("ip") or "").strip())
