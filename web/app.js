@@ -443,6 +443,10 @@ async function renderSites() {
     }
   };
   $$('[data-edit]').forEach(b => b.onclick = () => { location.hash = '#/site?name=' + encodeURIComponent(b.dataset.edit); });
+  $$('[data-restart]').forEach(b => b.onclick = () => restartUnit(b.dataset.restart, b));
+  $$('[data-logs]').forEach(b => b.onclick = () => {
+    location.hash = '#/logs?unit=' + encodeURIComponent(b.dataset.logs);
+  });
   $$('[data-toggle]').forEach(b => b.onclick = async () => {
     const enable = b.dataset.on !== '1';
     b.disabled = true;
