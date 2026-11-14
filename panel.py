@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
-VERSION = "1.3.7"
+VERSION = "1.3.8"
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE, "web")
 
@@ -177,6 +177,9 @@ def verify_password(pw, stored):
         return hmac.compare_digest(dk.hex(), hash_hex)
     except Exception:
         return False
+
+
+PENDING_TOTP = {"secret": "", "ts": 0.0}
 
 
 def gen_totp_secret():
@@ -2376,17 +2379,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_security_setup(self):
         secret = gen_totp_secret()
+        PENDING_TOTP["secret"] = secret
+        PENDING_TOTP["ts"] = time.time()
         return self._json({"ok": True, "secret": secret, "uri": otpauth_uri(secret)})
 
     def _api_security_enable(self):
         d = self._body()
         secret = (d.get("secret") or "").strip()
+        if not secret and time.time() - PENDING_TOTP.get("ts", 0) < 600:
+            secret = PENDING_TOTP.get("secret", "")
+        if not secret:
+            return self._json({"ok": False,
+                               "error": "密钥已过期，请重新点「启用两步验证」生成二维码"}, 400)
         if not verify_totp(secret, d.get("code", "")):
             return self._json({"ok": False, "error": "验证码不对，请确认手机时间准确"}, 400)
         codes = [secrets.token_hex(4).upper() for _ in range(8)]
         CFG["totp_enabled"] = True
         CFG["totp_secret"] = secret
         CFG["totp_recovery"] = recovery_hashes(codes)
+        PENDING_TOTP["secret"] = ""
+        PENDING_TOTP["ts"] = 0.0
         save_config()
         audit("security.2fa", "enabled")
         return self._json({"ok": True, "recovery": codes})

@@ -747,8 +747,9 @@ async function renderSecurity() {
       '<div class="hint">扫不了就手动输入下面的密钥：</div>' +
       '<pre class="log" id="tfaSecret" style="height:auto;max-height:80px"></pre>' +
       '<div class="hint mono" id="tfaUri" style="word-break:break-all"></div>' +
-      '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric">' +
-      '<button class="sm primary" id="confirm2fa">确认启用</button></div></div>';
+      '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric" maxlength="6">' +
+      '<button class="sm primary" id="confirm2fa">确认启用</button></div>' +
+      '<div class="hint" id="tfaMsg" style="margin-top:6px"></div></div>';
 
   let fbHtml;
   if (!fb.installed) {
@@ -829,6 +830,7 @@ async function renderSecurity() {
     const r = await api('/api/security/setup', { method: 'POST' });
     if (!r.ok) { toast(r.error || '生成失败', 'err'); return; }
     window.__tfaSecret = r.secret;
+    try { sessionStorage.setItem('tfa_secret', r.secret); } catch (e) {}
     $('#tfaSecret').textContent = r.secret;
     $('#tfaUri').textContent = r.uri;
     const qrBox = $('#tfaQr');
@@ -839,15 +841,45 @@ async function renderSecurity() {
     $('#tfaBox').style.display = 'block';
   };
   const confirm2fa = $('#confirm2fa');
-  if (confirm2fa) confirm2fa.onclick = async () => {
-    const r = await api('/api/security/enable', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret: window.__tfaSecret, code: $('#tfaCode').value.trim() }),
+  if (confirm2fa) {
+    const submit2fa = async () => {
+      const msg = $('#tfaMsg');
+      const code = ($('#tfaCode').value || '').trim();
+      if (!/^\d{6}$/.test(code)) {
+        if (msg) msg.textContent = '先输入手机上显示的 6 位数字验证码';
+        return;
+      }
+      let secret = window.__tfaSecret || '';
+      try { secret = secret || sessionStorage.getItem('tfa_secret') || ''; } catch (e) {}
+      if (msg) msg.textContent = '正在验证…';
+      confirm2fa.disabled = true;
+      confirm2fa.textContent = '验证中…';
+      try {
+        const r = await api('/api/security/enable', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: secret, code: code }),
+        });
+        if (!r.ok) {
+          if (msg) msg.textContent = r.error || '启用失败';
+          toast(r.error || '启用失败', 'err');
+          return;
+        }
+        try { sessionStorage.removeItem('tfa_secret'); } catch (e) {}
+        alert('两步验证已开启。请保存下面 8 个恢复码（每个只能用一次）：\n\n' + (r.recovery || []).join('\n'));
+        renderSecurity();
+      } catch (e) {
+        if (msg) msg.textContent = '请求失败：' + e.message;
+        toast('请求失败：' + e.message, 'err');
+      } finally {
+        confirm2fa.disabled = false;
+        confirm2fa.textContent = '确认启用';
+      }
+    };
+    confirm2fa.onclick = submit2fa;
+    $('#tfaCode').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit2fa(); }
     });
-    if (!r.ok) { toast(r.error, 'err'); return; }
-    alert('两步验证已开启。请保存下面 8 个恢复码（每个只能用一次）：\n\n' + r.recovery.join('\n'));
-    renderSecurity();
-  };
+  }
   const disable2fa = $('#disable2fa');
   if (disable2fa) disable2fa.onclick = async () => {
     const pw = prompt('输入当前密码'); if (!pw) return;
