@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE, "web")
 
@@ -1078,8 +1078,6 @@ def import_app(data):
     app_id = (data.get("id") or "").strip().lower()
     if not re.match(r"^[a-z0-9][a-z0-9-]*$", app_id):
         raise ValueError("应用 ID 只能是小写字母、数字、横线")
-    if find_app(app_id):
-        raise ValueError("应用 ID 已存在")
     unit = (data.get("unit") or "").strip()
     path = (data.get("path") or "").strip()
     if not unit or not path:
@@ -1090,6 +1088,20 @@ def import_app(data):
     health = (data.get("health_url") or "").strip()
     if not health and str(port).isdigit():
         health = "http://127.0.0.1:%s/" % port
+    existing = next((a for a in CFG["apps"] if a["unit"] == unit), None)
+    if existing:
+        existing["path"] = path or existing.get("path", "")
+        existing["name"] = data.get("name") or existing.get("name", app_id)
+        if str(port).isdigit():
+            existing["port"] = int(port)
+        if health:
+            existing["health_url"] = health
+        save_config()
+        audit("app.update", "%s (%s) port=%s" % (existing["id"], unit, existing.get("port")))
+        return True, "已更新服务 %s（端口 %s）" % (unit, existing.get("port") or "未设置")
+
+    if find_app(app_id):
+        raise ValueError("应用 ID 已存在")
     CFG["apps"].append({
         "id": app_id, "name": data.get("name") or app_id, "unit": unit,
         "path": path, "owner": data.get("owner") or CFG.get("default_owner", "www-data:www-data"),
@@ -1116,8 +1128,24 @@ def letsencrypt_certs():
     return out
 
 
+def listening_ports():
+    """PID -> 监听端口，用于反查没有在命令行写端口的服务。"""
+    rc, out, _ = run(["ss", "-lntp"], timeout=20)
+    mapping = {}
+    if rc != 0:
+        return mapping
+    for line in (out or "").splitlines():
+        m = re.search(r"(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|\*):(\d+)", line)
+        p = re.search(r"pid=(\d+)", line)
+        if not m or not p:
+            continue
+        mapping.setdefault(int(p.group(1)), []).append(int(m.group(1)))
+    return mapping
+
+
 def discover():
-    known_units = {a["unit"] for a in CFG["apps"]}
+    known = {a["unit"]: a for a in CFG["apps"]}
+    ports = listening_ports()
     units = []
     rc, out, _ = run(["systemctl", "list-units", "--type=service", "--state=running",
                       "--no-legend", "--no-pager"], timeout=20)
@@ -1126,10 +1154,10 @@ def discover():
         if not parts:
             continue
         unit = parts[0]
-        if unit in known_units or not unit.endswith(".service"):
+        if not unit.endswith(".service"):
             continue
-        rc2, info, _ = run(["systemctl", "show", unit,
-                            "-p", "ExecStart", "-p", "WorkingDirectory"], timeout=10)
+        rc2, info, _ = run(["systemctl", "show", unit, "-p", "ExecStart",
+                            "-p", "WorkingDirectory", "-p", "MainPID"], timeout=10)
         if "/var/www/" not in info:
             continue
         wd = ""
@@ -1152,7 +1180,21 @@ def discover():
             if a.isdigit() and 0 < int(a) < 65536:
                 port = int(a)
                 break
-        units.append({"unit": unit, "path": path, "port": port, "command": " ".join(argv)[:200]})
+        if not port:
+            pid = 0
+            for tok in info.split():
+                if tok.startswith("MainPID="):
+                    try:
+                        pid = int(tok.split("=", 1)[1])
+                    except ValueError:
+                        pid = 0
+            candidates = ports.get(pid) or []
+            if candidates:
+                port = sorted(candidates)[0]
+        app = known.get(unit)
+        units.append({"unit": unit, "path": path, "port": port,
+                      "managed": bool(app), "app_id": app["id"] if app else "",
+                      "command": " ".join(argv)[:200]})
 
     return {"sites": list_sites(), "units": units,
             "certs": list_certs(), "letsencrypt": letsencrypt_certs(),

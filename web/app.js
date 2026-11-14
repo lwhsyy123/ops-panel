@@ -255,10 +255,12 @@ async function renderServer() {
     ).join('');
     const unitRows = (dd.units || []).map(u =>
       '<tr><td class="mono">' + esc(u.unit) + '</td><td class="mono">' + esc(u.path || '—') +
-      '</td><td class="mono">' + esc(u.port || '—') + '</td>' +
+      '</td><td class="mono">' + esc(u.port || '未识别') + '</td>' +
+      '<td>' + (u.managed ? '<span class="badge ok">已纳管</span>' : '<span class="badge">未纳管</span>') + '</td>' +
       '<td><button class="sm" data-import="' + esc(u.unit) + '" data-path="' + esc(u.path || '') +
-      '" data-port="' + esc(u.port || '') + '">加入面板</button></td></tr>'
-    ).join('') || '<tr><td colspan="4" class="hint">没有未纳管的 /var/www 服务</td></tr>';
+      '" data-port="' + esc(u.port || '') + '" data-managed="' + (u.managed ? '1' : '0') +
+      '" data-appid="' + esc(u.app_id || '') + '">' + (u.managed ? '更新端口' : '加入面板') + '</button></td></tr>'
+    ).join('') || '<tr><td colspan="5" class="hint">没有找到 /var/www 下的服务（检查 systemd 的 WorkingDirectory 或 ExecStart）</td></tr>';
     const leRows = (dd.letsencrypt || []).map(c =>
       '<tr><td class="mono">' + esc(c.name) + '</td><td class="mono">' + esc(c.not_after || '—') + '</td>' +
       '<td>' + esc(c.days_left) + ' 天</td></tr>'
@@ -267,21 +269,25 @@ async function renderServer() {
       '<div class="hint">站点（' + (dd.sites || []).length + '）</div>' +
       '<table><thead><tr><th>文件</th><th>域名</th></tr></thead><tbody>' + siteRows + '</tbody></table>' +
       '<div class="hint" style="margin-top:8px">运行中的服务</div>' +
-      '<table><thead><tr><th>Unit</th><th>目录</th><th>端口</th><th></th></tr></thead><tbody>' + unitRows + '</tbody></table>' +
+      '<table><thead><tr><th>Unit</th><th>目录</th><th>端口</th><th>状态</th><th></th></tr></thead><tbody>' + unitRows + '</tbody></table>' +
       (leRows ? '<div class="hint" style="margin-top:8px">Let\'s Encrypt</div><table><thead><tr><th>域名</th><th>到期</th><th>剩余</th></tr></thead><tbody>' + leRows + '</tbody></table>' : '');
     $$('[data-import]').forEach(b => b.onclick = async () => {
       const unit = b.dataset.import;
+      const managed = b.dataset.managed === '1';
       const def = unit.replace(/\.service$/, '').replace(/[^a-z0-9-]/g, '-');
-      const id = prompt('应用 ID（小写字母/数字/横线）', def);
+      const id = managed ? b.dataset.appid : prompt('应用 ID（小写字母/数字/横线）', def);
       if (!id) return;
-      const name = prompt('显示名称', id);
+      const name = managed ? id : (prompt('显示名称', id) || id);
+      const port = prompt('监听端口（站点靠它关联服务）', b.dataset.port || '8080');
+      if (port === null) return;
       b.disabled = true;
       const r = await api('/api/apps/import', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: id, name: name || id, unit: unit, path: b.dataset.path, port: b.dataset.port }),
+        body: JSON.stringify({ id: id, name: name, unit: unit, path: b.dataset.path, port: port }),
       });
       b.disabled = false;
       toast(r.ok ? r.message : r.error, r.ok ? 'ok' : 'err');
+      if (r.ok) renderServer();
     });
   };
 }
@@ -557,49 +563,6 @@ async function renderSiteEditor(name) {
   };
 }
 
-/* ------------------------------ 证书 ------------------------------ */
-async function renderCerts() {
-  stopRefresh();
-  const d = await api('/api/certs');
-  if (!d.ok) return;
-  const rows = (d.certs || []).map(c => {
-    const days = c.days_left;
-    const cls = days == null ? '' : days < 14 ? 'err' : days < 30 ? 'warn' : 'ok';
-    return '<tr><td class="mono">' + esc(c.name) + '</td>' +
-      '<td class="mono">' + esc((c.subject || '').replace(/^CN\s*=\s*/, '')) + '</td>' +
-      '<td class="mono">' + esc(c.not_after || '—') + '</td>' +
-      '<td><span class="badge ' + cls + '">' + (days == null ? '—' : days + ' 天') + '</span></td>' +
-      '<td>' + (c.has_key ? '<span class="badge ok">有</span>' : '<span class="badge err">缺私钥</span>') + '</td>' +
-      '<td><button class="sm danger" data-del="' + esc(c.name) + '">删除</button></td></tr>';
-  }).join('') || '<tr><td colspan="6" class="hint">还没有证书，用下面的表单上传</td></tr>';
-  $('#main').innerHTML = '<h1>证书</h1><div class="sub">目录 ' + esc(d.dir) + '</div>' +
-    '<div class="card"><table><thead><tr><th>名称</th><th>域名</th><th>到期</th><th>剩余</th><th>私钥</th><th></th></tr></thead><tbody>' +
-    rows + '</tbody></table></div>' +
-    '<div class="card" style="margin-top:14px"><h3>上传证书</h3>' +
-    '<div class="hint">Cloudflare → SSL/TLS → Origin Server 生成，粘贴 pem 和私钥。文件名会成为 nginx 里引用的 .pem/.key。</div>' +
-    '<div class="col"><input type="text" id="certname" placeholder="名称，如 example.com">' +
-    '<textarea class="editor tall" id="certpem" placeholder="-----BEGIN CERTIFICATE-----"></textarea>' +
-    '<textarea class="editor tall" id="certkey" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>' +
-    '<div class="row"><button class="primary" id="uploadcert">保存证书</button>' +
-    '<span class="hint">保存前会校验证书与私钥是否匹配</span></div></div></div>';
-  $$('[data-del]').forEach(b => b.onclick = async () => {
-    if (!confirm('删除证书 ' + b.dataset.del + '？引用它的站点会立刻报错。')) return;
-    const r = await api('/api/certs/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' });
-    toast(r.ok ? '已删除' : r.error, r.ok ? 'ok' : 'err');
-    renderCerts();
-  });
-  $('#uploadcert').onclick = async () => {
-    const body = JSON.stringify({
-      name: $('#certname').value.trim(),
-      cert: $('#certpem').value,
-      key: $('#certkey').value,
-    });
-    const r = await api('/api/certs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    toast(r.ok ? ('已保存：' + r.cert.name) : r.error, r.ok ? 'ok' : 'err');
-    if (r.ok) renderCerts();
-  };
-}
-
 /* ------------------------------ 部署 ------------------------------ */
 async function renderDeploy(params) {
   stopRefresh();
@@ -654,66 +617,6 @@ async function renderDeploy(params) {
     toast(r.ok ? r.message : ('回滚失败：' + r.error), r.ok ? 'ok' : 'err');
     renderDeploy();
   });
-}
-
-/* ------------------------------ 发现 ------------------------------ */
-async function renderDiscover() {
-  stopRefresh();
-  $('#main').innerHTML = '<h1>发现</h1><div class="sub">扫描本机已存在的站点、systemd 服务、证书</div>' +
-    '<div class="toolbar"><button class="primary" id="scan">开始扫描</button></div>' +
-    '<div id="scanOut"></div>';
-  const scan = async () => {
-    $('#scanOut').innerHTML = '<div class="hint">扫描中…</div>';
-    const d = await api('/api/discover');
-    if (!d.ok) { $('#scanOut').innerHTML = '<div class="sub">' + esc(d.error) + '</div>'; return; }
-    const siteRows = (d.sites || []).map(s =>
-      '<tr><td class="mono">' + esc(s.name) + '</td><td>' +
-      (s.domains || []).map(x => '<span class="badge">' + esc(x) + '</span>').join(' ') +
-      '</td><td class="mono">' + esc((s.upstreams || []).join(', ') || (s.roots || []).join(', ') || '—') +
-      '</td><td>' + (s.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">停用</span>') + '</td></tr>'
-    ).join('') || '<tr><td colspan="4" class="hint">没找到站点</td></tr>';
-
-    const unitRows = (d.units || []).map(u =>
-      '<tr><td class="mono">' + esc(u.unit) + '</td><td class="mono">' + esc(u.path || '—') +
-      '</td><td class="mono">' + esc(u.port || '—') + '</td>' +
-      '<td><button class="sm" data-import="' + esc(u.unit) + '" data-path="' + esc(u.path || '') +
-      '" data-port="' + esc(u.port || '') + '">加入面板</button></td></tr>'
-    ).join('') || '<tr><td colspan="4" class="hint">没有未纳管的 /var/www 服务</td></tr>';
-
-    const certRows = (d.certs || []).map(c =>
-      '<tr><td class="mono">' + esc(c.name) + '</td><td class="mono">' + esc(c.not_after || '—') + '</td>' +
-      '<td><span class="badge ' + (c.days_left < 14 ? 'err' : c.days_left < 30 ? 'warn' : 'ok') + '">' +
-      esc(c.days_left) + ' 天</span></td></tr>'
-    ).join('') || '<tr><td colspan="3" class="hint">没有证书</td></tr>';
-
-    const leRows = (d.letsencrypt || []).map(c =>
-      '<tr><td class="mono">' + esc(c.name) + '</td><td class="mono">' + esc(c.path) + '</td>' +
-      '<td>' + esc(c.days_left) + ' 天</td></tr>'
-    ).join('');
-
-    $('#scanOut').innerHTML =
-      '<div class="card"><h3>站点（' + (d.sites || []).length + '）</h3><table><thead><tr><th>文件</th><th>域名</th><th>上游</th><th>状态</th></tr></thead><tbody>' + siteRows + '</tbody></table></div>' +
-      '<div class="card" style="margin-top:14px"><h3>运行中的服务（未纳管）</h3><table><thead><tr><th>Unit</th><th>目录</th><th>端口</th><th></th></tr></thead><tbody>' + unitRows + '</tbody></table></div>' +
-      '<div class="card" style="margin-top:14px"><h3>证书（' + (d.certs || []).length + '）</h3><table><thead><tr><th>名称</th><th>到期</th><th>剩余</th></tr></thead><tbody>' + certRows + '</tbody></table></div>' +
-      (leRows ? '<div class="card" style="margin-top:14px"><h3>Let\'s Encrypt</h3><table><thead><tr><th>域名</th><th>路径</th><th>剩余</th></tr></thead><tbody>' + leRows + '</tbody></table></div>' : '');
-
-    $$('[data-import]').forEach(b => b.onclick = async () => {
-      const unit = b.dataset.import;
-      const def = unit.replace(/\.service$/, '').replace(/[^a-z0-9-]/g, '-');
-      const id = prompt('应用 ID（小写字母/数字/横线）', def);
-      if (!id) return;
-      const name = prompt('显示名称', id);
-      b.disabled = true;
-      const r = await api('/api/apps/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: id, name: name || id, unit: unit, path: b.dataset.path, port: b.dataset.port }),
-      });
-      b.disabled = false;
-      toast(r.ok ? r.message : r.error, r.ok ? 'ok' : 'err');
-    });
-  };
-  $('#scan').onclick = scan;
-  scan();
 }
 
 /* ------------------------------ 告警 ------------------------------ */
