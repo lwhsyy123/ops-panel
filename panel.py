@@ -1491,8 +1491,10 @@ class Monitor(threading.Thread):
             strikes = 0
         d["load"] = {"load1": round(load1, 2), "cpu": cpu, "strikes": strikes, "ts": now_str()}
         if strikes == 3:
-            self.alert("load", "负载偏高 %.2f" % load1,
-                       "1 分钟负载 %.2f，CPU 核数 %d，阈值 %.1f 倍。" % (load1, cpu, ratio))
+            self.alert("load", "负载偏高 %.2f（%d 核）" % (load1, cpu),
+                       "1 分钟负载 %.2f，CPU 核数 %d，阈值 %.1f 倍。\n"
+                       "负载 = 正在运行 + 等待 I/O 的进程数；持续高于 核数×倍数 才算异常。"
+                       % (load1, cpu, ratio))
 
         mem_pct = None
         try:

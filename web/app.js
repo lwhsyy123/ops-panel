@@ -633,7 +633,10 @@ async function renderAlerts() {
     const cls = e.level === 'alert' ? 'err' : e.level === 'error' ? 'err' : e.level === 'daily' ? 'ok' : 'ok';
     return '<tr><td class="mono">' + esc(e.ts) + '</td>' +
       '<td><span class="badge ' + cls + '">' + esc(e.kind) + '</span></td>' +
-      '<td>' + esc(e.title) + '</td>' +
+      '<td>' + esc(e.title) +
+      (e.error ? '<div class="hint">推送失败：' + esc(e.error) + '</div>' : '') +
+      (e.detail ? '<div class="hint">' + esc(String(e.detail).split('\n')[0]) + '</div>' : '') +
+      '</td>' +
       '<td>' + (e.sent === true ? '<span class="badge ok">已推送</span>' : (e.sent === false ? '<span class="badge err">失败</span>' : '<span class="hint">—</span>')) + '</td></tr>';
   }).join('') || '<tr><td colspan="4" class="hint">还没有事件</td></tr>';
 
@@ -660,6 +663,8 @@ async function renderAlerts() {
     '<div class="row"><span class="hint" style="width:110px">证书剩余天</span><input type="text" id="tCert" value="' + esc(th.cert_days) + '" style="width:80px"></div>' +
     '<div class="row"><span class="hint" style="width:110px">连续失败次数</span><input type="text" id="tFail" value="' + esc(th.http_failures) + '" style="width:80px"></div>' +
     '<div class="row"><span class="hint" style="width:110px">巡检间隔秒</span><input type="text" id="tInterval" value="' + esc(th.check_interval) + '" style="width:80px"></div>' +
+    '<div class="row"><span class="hint" style="width:110px">负载倍数</span><input type="text" id="tLoad" value="' + esc(th.load_ratio) + '" style="width:80px"></div>' +
+    '<div class="row"><span class="hint" style="width:110px">内存 %</span><input type="text" id="tMem" value="' + esc(th.mem_percent) + '" style="width:80px"></div>' +
     '<div class="toolbar"><button class="primary" id="saveNotify">保存</button>' +
     '<button class="ghost" id="testNotify">测试推送</button></div></div></div></div>' +
     '<div class="card" style="margin-top:14px"><h3>当前状态</h3><table><thead><tr><th>服务</th><th>状态</th><th>HTTP</th><th>响应</th><th>原因</th></tr></thead><tbody>' +
@@ -678,6 +683,7 @@ async function renderAlerts() {
       thresholds: {
         disk_percent: $('#tDisk').value, cert_days: $('#tCert').value,
         http_failures: $('#tFail').value, check_interval: $('#tInterval').value,
+        load_ratio: $('#tLoad').value, mem_percent: $('#tMem').value,
       },
     };
     const token = $('#aToken').value.trim();
