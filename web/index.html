@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ops-panel</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">ops<span>panel</span><small>VPS 控制台</small></div>
+    <nav id="nav">
+      <a href="#/overview" data-tab="overview" data-short="概览">概览</a>
+      <a href="#/sites" data-tab="sites" data-short="站点">站点</a>
+      <a href="#/server" data-tab="server" data-short="服务器">服务器</a>
+      <a href="#/alerts" data-tab="alerts" data-short="告警">告警</a>
+      <a href="#/logs" data-tab="logs" data-short="日志">日志</a>
+    </nav>
+    <div class="side-foot">
+      <a href="https://www.cloudflare.com" target="_blank" rel="noreferrer">Cloudflare ↗</a>
+      <a id="logout">退出登录</a>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · ops-panel</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" id="form">
+    <h1>ops<span style="color:var(--accent)">panel</span></h1>
+    <div class="sub">VPS 控制台 · 仅限本机隧道访问</div>
+    <input type="password" id="pw" placeholder="管理密码" autocomplete="current-password" autofocus>
+    <button class="primary" type="submit">进入</button>
+    <div class="login-err" id="err"></div>
+  </form>
+</div>
+<script>
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('err');
+  err.textContent = '';
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password: document.getElementById('pw').value}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data.ok) { location.href = '/'; }
+  else { err.textContent = data.error || '登录失败'; }
+});
+</script>
+</body>
+</html>

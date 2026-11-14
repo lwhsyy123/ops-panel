@@ -1,0 +1,39 @@
+{
+  "bind": "127.0.0.1",
+  "port": 9100,
+  "password_hash": "REPLACE_ME",
+  "deploy_token": "REPLACE_ME",
+  "certs_dir": "/etc/ssl/cloudflare",
+  "backup_dir": "/var/backups/ops-panel",
+  "state_dir": "/var/lib/ops-panel",
+  "audit_log": "/var/log/ops-panel/audit.log",
+  "systemd_dir": "/etc/systemd/system",
+  "default_owner": "www-data:www-data",
+  "metrics_demo": false,
+  "max_upload_mb": 300,
+  "nginx": {
+    "bin": "nginx",
+    "sites_enabled": "/etc/nginx/sites-enabled",
+    "sites_available": "/etc/nginx/sites-available",
+    "error_log": "/var/log/nginx/error.log",
+    "access_log": "/var/log/nginx/access.log"
+  },
+  "notify": {
+    "enabled": false,
+    "base_url": "",
+    "token": "",
+    "channels": [],
+    "daily_at": "09:00",
+    "heartbeat_name": "opspanel",
+    "thresholds": {
+      "disk_percent": 85,
+      "cert_days": 14,
+      "http_failures": 2,
+      "check_interval": 60,
+      "response_ms": 5000,
+      "load_ratio": 2,
+      "mem_percent": 90
+    }
+  },
+  "apps": []
+}
