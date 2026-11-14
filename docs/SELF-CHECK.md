@@ -12,6 +12,7 @@
 | Shell 语法 | `bash -n install.sh deploy.sh bootstrap.sh demo/demo.sh` | 通过 |
 | 登录 / 会话 | curl 登录、未登录跳转 | 通过 |
 | 2FA 启用 | 生成 TOTP、6 位码确认、8 个恢复码 | 通过 |
+| 2FA 二维码 | 本地 qrcodejs 渲染 otpauth URI | 通过 |
 | 2FA 登录 | 无码 401、有码 200 | 通过 |
 | 恢复码 | 一次性使用、剩余数量递减、复用 401 | 通过 |
 | 关闭 2FA | 密码 + 动态码 | 通过 |
