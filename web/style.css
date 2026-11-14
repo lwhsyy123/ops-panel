@@ -208,6 +208,9 @@ textarea.tall { height: 200px; }
 .login-card button { width: 100%; margin-top: 6px; }
 .login-err { color: var(--err); font-size: 12.5px; min-height: 18px; margin-top: 6px; }
 
+.qrbox { background: #fff; padding: 10px; border-radius: 10px; display: inline-block; margin: 8px 0; min-height: 20px; }
+.qrbox img, .qrbox canvas { display: block; }
+
 .site-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
 .svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
 .site-card { display: flex; flex-direction: column; }

@@ -1,0 +1,4 @@
+qrcodejs
+Copyright (c) 2012 davidshimjs
+Licensed under the MIT License.
+https://github.com/davidshimjs/qrcodejs

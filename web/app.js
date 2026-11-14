@@ -704,7 +704,9 @@ async function renderSecurity() {
     : '<div class="hint">开启后登录需要「密码 + 6 位动态码」。如果要让面板直接暴露公网，这一项必须开。</div>' +
       '<div class="row"><button class="sm primary" id="enable2fa">启用两步验证</button></div>' +
       '<div id="tfaBox" style="display:none;margin-top:10px">' +
-      '<div class="hint">在 Google Authenticator / 1Password / 微软验证器里手动添加这个密钥（TOTP）：</div>' +
+      '<div class="hint">用 Google Authenticator / 1Password / 微软验证器扫这个二维码：</div>' +
+      '<div id="tfaQr" class="qrbox"></div>' +
+      '<div class="hint">扫不了就手动输入下面的密钥：</div>' +
       '<pre class="log" id="tfaSecret" style="height:auto;max-height:80px"></pre>' +
       '<div class="hint mono" id="tfaUri" style="word-break:break-all"></div>' +
       '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric">' +
@@ -752,6 +754,11 @@ async function renderSecurity() {
     window.__tfaSecret = r.secret;
     $('#tfaSecret').textContent = r.secret;
     $('#tfaUri').textContent = r.uri;
+    const qrBox = $('#tfaQr');
+    qrBox.innerHTML = '';
+    if (window.QRCode) {
+      new QRCode(qrBox, { text: r.uri, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M });
+    }
     $('#tfaBox').style.display = 'block';
   };
   const confirm2fa = $('#confirm2fa');

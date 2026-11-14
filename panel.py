@@ -1914,7 +1914,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(302, b"", "text/plain", {"Location": loc})
 
     def _file(self, name):
-        if name not in ("index.html", "login.html", "force-password.html", "app.js", "style.css"):
+        if name not in ("index.html", "login.html", "force-password.html",
+                        "app.js", "style.css", "qrcode.min.js"):
             return self._send(404, "not found", "text/plain; charset=utf-8")
         p = os.path.join(WEB_DIR, name)
         if not os.path.exists(p):
