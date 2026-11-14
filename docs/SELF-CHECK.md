@@ -36,6 +36,9 @@
 | 部署 | 上传包、备份、rsync、重启、快照 | 通过（假 systemd） |
 | 回滚 | 快照还原 | 通过 |
 | 告警推送 | mock RemindHub 收到 Bearer + 报文 | 通过 |
+| 负载告警门槛 | load 高 + 队列/I-O 压力才触发 | 通过 |
+| fail2ban 状态 | 解析 jail、封禁数、IP 列表 | 通过 |
+| 解封 | 校验 IP 并调用 fail2ban-client | 通过 |
 | 日报 | 生成并投递 | 通过 |
 | 故障/恢复 | 连续失败触发、恢复通知 | 通过 |
 | 心跳 | /api/heartbeat | 通过 |

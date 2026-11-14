@@ -664,6 +664,7 @@ async function renderAlerts() {
     '<div class="row"><span class="hint" style="width:110px">连续失败次数</span><input type="text" id="tFail" value="' + esc(th.http_failures) + '" style="width:80px"></div>' +
     '<div class="row"><span class="hint" style="width:110px">巡检间隔秒</span><input type="text" id="tInterval" value="' + esc(th.check_interval) + '" style="width:80px"></div>' +
     '<div class="row"><span class="hint" style="width:110px">负载倍数</span><input type="text" id="tLoad" value="' + esc(th.load_ratio) + '" style="width:80px"></div>' +
+    '<div class="row"><span class="hint" style="width:110px">I/O 等待 %</span><input type="text" id="tIo" value="' + esc(th.iowait_percent) + '" style="width:80px"></div>' +
     '<div class="row"><span class="hint" style="width:110px">内存 %</span><input type="text" id="tMem" value="' + esc(th.mem_percent) + '" style="width:80px"></div>' +
     '<div class="toolbar"><button class="primary" id="saveNotify">保存</button>' +
     '<button class="ghost" id="testNotify">测试推送</button></div></div></div></div>' +
@@ -684,6 +685,7 @@ async function renderAlerts() {
         disk_percent: $('#tDisk').value, cert_days: $('#tCert').value,
         http_failures: $('#tFail').value, check_interval: $('#tInterval').value,
         load_ratio: $('#tLoad').value, mem_percent: $('#tMem').value,
+        iowait_percent: $('#tIo').value,
       },
     };
     const token = $('#aToken').value.trim();
@@ -703,6 +705,7 @@ async function renderSecurity() {
   stopRefresh();
   const sec = await api('/api/security');
   const st = await api('/api/settings');
+  const fb = await api('/api/fail2ban');
   const ver = sec.version || st.version || '';
 
   const tfa = sec.enabled
@@ -720,6 +723,29 @@ async function renderSecurity() {
       '<div class="row" style="margin-top:8px"><input type="text" id="tfaCode" placeholder="6 位验证码" style="width:150px" inputmode="numeric">' +
       '<button class="sm primary" id="confirm2fa">确认启用</button></div></div>';
 
+  let fbHtml;
+  if (!fb.installed) {
+    fbHtml = '<div class="hint">未安装 fail2ban。Ubuntu 安装：apt install -y fail2ban</div>';
+  } else if (!fb.running) {
+    fbHtml = '<div class="hint">fail2ban 未运行或 sshd jail 未启用</div>' +
+      (fb.error ? '<div class="hint">' + esc(fb.error) + '</div>' : '');
+  } else {
+    const ips = (fb.banned || []).map(ip =>
+      '<span class="badge err" style="margin:2px 4px 2px 0">' + esc(ip) +
+      ' <button class="sm ghost" style="padding:0 4px" data-unban="' + esc(ip) + '">解封</button></span>'
+    ).join('') || '<span class="hint">当前没有封禁 IP</span>';
+    const logText = (fb.recent || []).join('\n') || '（暂无 ban/unban 记录）';
+    fbHtml =
+      '<div class="meta"><span>当前失败 <b>' + esc(fb.currently_failed || 0) + '</b></span>' +
+      '<span>累计失败 <b>' + esc(fb.total_failed || 0) + '</b></span>' +
+      '<span>当前封禁 <b>' + esc(fb.currently_banned || 0) + '</b></span>' +
+      '<span>累计封禁 <b>' + esc(fb.total_banned || 0) + '</b></span>' +
+      '<span>jail：' + esc((fb.jails || []).join(', ') || 'sshd') + '</span></div>' +
+      '<div class="row" style="margin-top:10px">' + ips + '</div>' +
+      '<pre class="log" style="height:220px;margin-top:10px">' + esc(logText) + '</pre>' +
+      '<div class="row"><button class="sm ghost" id="fbRefresh">刷新</button></div>';
+  }
+
   $('#main').innerHTML = '<h1>安全</h1><div class="sub">密码 · 两步验证 · 部署令牌' +
     (ver ? ' · v' + esc(ver) : '') + '</div>' +
     '<div class="grid">' +
@@ -732,7 +758,8 @@ async function renderSecurity() {
     '<div class="hint">deploy.sh 用它调用部署接口，不是登录密码。泄露后在这里重置，旧令牌立即失效。</div>' +
     '<div class="row"><button class="sm danger" id="rotateToken">重置令牌</button></div></div>' +
     '</div>' +
-    '<div class="card" style="margin-top:14px"><h3>两步验证（2FA）</h3>' + tfa + '</div>';
+    '<div class="card" style="margin-top:14px"><h3>两步验证（2FA）</h3>' + tfa + '</div>' +
+    '<div class="card" style="margin-top:14px"><h3>IP 封禁（fail2ban）</h3>' + fbHtml + '</div>';
 
   $('#savePw').onclick = async () => {
     const cur = $('#pwCur').value, np = $('#pwNew').value, np2 = $('#pwNew2').value;
@@ -754,6 +781,21 @@ async function renderSecurity() {
     if (!r.ok) { toast(r.error || '重置失败', 'err'); return; }
     alert('新的部署令牌（只显示一次）：\n\n' + r.token + '\n\n记得更新 deploy.sh 的 OPS_TOKEN');
   };
+
+  $$('[data-unban]').forEach(b => b.onclick = async () => {
+    const ip = b.dataset.unban;
+    if (!confirm('解封 ' + ip + '？')) return;
+    b.disabled = true;
+    const r = await api('/api/fail2ban/unban', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: ip }),
+    });
+    b.disabled = false;
+    toast(r.ok ? '已解封 ' + ip : (r.error || r.message || '解封失败'), r.ok ? 'ok' : 'err');
+    if (r.ok) renderSecurity();
+  });
+  const fbRefresh = $('#fbRefresh');
+  if (fbRefresh) fbRefresh.onclick = () => renderSecurity();
 
   const enable2fa = $('#enable2fa');
   if (enable2fa) enable2fa.onclick = async () => {

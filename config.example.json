@@ -38,6 +38,7 @@
       "check_interval": 60,
       "response_ms": 5000,
       "load_ratio": 2,
+      "iowait_percent": 25,
       "mem_percent": 90
     }
   },

@@ -13,6 +13,7 @@ import argparse
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -137,6 +138,7 @@ def load_config(path):
     th.setdefault("check_interval", 60)
     th.setdefault("response_ms", 5000)
     th.setdefault("load_ratio", 2)
+    th.setdefault("iowait_percent", 25)
     th.setdefault("mem_percent", 90)
     return cfg
 
@@ -1221,6 +1223,42 @@ def _proc_cpu_sample():
     return None
 
 
+def load_pressure():
+    """返回 (load1, runnable, iowait%)，用于判断负载是否有真实压力。"""
+    load1 = 0.0
+    runnable = 0
+    try:
+        with open("/proc/loadavg", "r", encoding="utf-8") as f:
+            parts = f.read().split()
+        load1 = float(parts[0])
+        runnable = int(parts[3].split("/")[0])
+    except (OSError, ValueError, IndexError):
+        try:
+            load1 = os.getloadavg()[0]
+        except OSError:
+            pass
+    iowait = None
+    try:
+        def snap():
+            with open("/proc/stat", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("cpu "):
+                        return [int(x) for x in line.split()[1:8]]
+            return None
+
+        a = snap()
+        time.sleep(0.2)
+        b = snap()
+        if a and b:
+            delta = [b[i] - a[i] for i in range(min(len(a), len(b)))]
+            total = sum(delta)
+            if total > 0:
+                iowait = round(100.0 * delta[4] / total, 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    return load1, runnable, iowait
+
+
 def _proc_net_sample():
     rx = tx = 0
     try:
@@ -1478,23 +1516,25 @@ class Monitor(threading.Thread):
                        % (pct, human_size(disk.used), human_size(disk.total), warn))
 
         cpu = os.cpu_count() or 1
-        try:
-            load1 = os.getloadavg()[0]
-        except OSError:
-            load1 = 0.0
+        load1, runnable, iowait = load_pressure()
         ratio = float(th.get("load_ratio", 2))
+        io_limit = float(th.get("iowait_percent", 25))
         load_prev = d.get("load") or {}
         strikes = int(load_prev.get("strikes", 0))
-        if load1 > cpu * ratio:
-            strikes += 1
-        else:
-            strikes = 0
-        d["load"] = {"load1": round(load1, 2), "cpu": cpu, "strikes": strikes, "ts": now_str()}
+        pressure = False
+        io_high = iowait is not None and iowait >= io_limit
+        if load1 > cpu * ratio and (io_high or runnable > cpu):
+            pressure = True
+        strikes = strikes + 1 if pressure else 0
+        d["load"] = {"load1": round(load1, 2), "runnable": runnable,
+                     "iowait": iowait, "cpu": cpu, "strikes": strikes, "ts": now_str()}
         if strikes == 3:
-            self.alert("load", "负载偏高 %.2f（%d 核）" % (load1, cpu),
-                       "1 分钟负载 %.2f，CPU 核数 %d，阈值 %.1f 倍。\n"
-                       "负载 = 正在运行 + 等待 I/O 的进程数；持续高于 核数×倍数 才算异常。"
-                       % (load1, cpu, ratio))
+            reason = "I/O 等待" if io_high else "可运行队列"
+            self.alert("load", "负载偏高 %.2f（%d 核，%s）" % (load1, cpu, reason),
+                       "1 分钟负载 %.2f，CPU 核数 %d，可运行进程 %d，I/O 等待 %.1f%%。\n"
+                       "触发条件：负载 > %.1f 且（可运行 > %d 或 I/O 等待 ≥ %.0f%%），连续 3 次。"
+                       % (load1, cpu, runnable, iowait if iowait is not None else 0,
+                          cpu * ratio, cpu, io_limit))
 
         mem_pct = None
         try:
@@ -1603,6 +1643,62 @@ def human_size(n):
             return "%.1f %s" % (n, unit) if unit != "B" else "%d B" % n
         n /= 1024
     return "%.1f PB" % n
+
+
+# --------------------------------------------------------------------------
+# fail2ban
+# --------------------------------------------------------------------------
+def fail2ban_status():
+    if not shutil.which("fail2ban-client"):
+        return {"installed": False, "running": False, "jails": [],
+                "banned": [], "recent": [], "error": "未安装 fail2ban"}
+    rc, out, err = run(["fail2ban-client", "status", "sshd"], timeout=15)
+    if rc != 0 or "Status for the jail" not in (out or ""):
+        return {"installed": True, "running": False, "jails": [],
+                "banned": [], "recent": [],
+                "error": (err or out or "无法读取 sshd jail，可能未启用")[:300]}
+
+    def after(label):
+        for line in out.splitlines():
+            idx = line.find(label)
+            if idx >= 0:
+                return line[idx + len(label):].strip()
+        return ""
+
+    jails = []
+    rc2, jout, _ = run(["fail2ban-client", "status"], timeout=15)
+    if rc2 == 0:
+        for line in (jout or "").splitlines():
+            if "Jail list:" in line:
+                jails = [x.strip() for x in line.split("Jail list:", 1)[1].split(",") if x.strip()]
+
+    recent = []
+    try:
+        with open("/var/log/fail2ban.log", "r", encoding="utf-8", errors="replace") as f:
+            for line in f.readlines()[-400:]:
+                if "] Ban " in line or "] Unban " in line:
+                    recent.append(line.strip())
+        recent = recent[-30:]
+    except OSError:
+        pass
+
+    return {"installed": True, "running": True, "jails": jails,
+            "currently_failed": after("Currently failed:"),
+            "total_failed": after("Total failed:"),
+            "currently_banned": after("Currently banned:"),
+            "total_banned": after("Total banned:"),
+            "banned": after("Banned IP list:").split(),
+            "recent": recent}
+
+
+def fail2ban_unban(ip):
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        raise ValueError("IP 格式不对")
+    rc, out, err = run(["fail2ban-client", "set", "sshd", "unbanip", ip], timeout=15)
+    audit("fail2ban.unban", ip, ok=rc == 0)
+    return rc == 0, (out + " " + err).strip() or "已解封"
 
 
 # --------------------------------------------------------------------------
@@ -1792,6 +1888,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_discover()
             if path == "/api/firewall":
                 return self._api_firewall()
+            if path == "/api/fail2ban":
+                return self._api_fail2ban()
             if path == "/api/settings":
                 return self._api_settings()
             if path == "/api/security":
@@ -1865,6 +1963,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/firewall/toggle":
                 d = self._body()
                 ok, msg = firewall_set(bool(d.get("active")))
+                return self._json({"ok": ok, "message": msg}, 200 if ok else 400)
+            if path == "/api/fail2ban/unban":
+                d = self._body()
+                ok, msg = fail2ban_unban((d.get("ip") or "").strip())
                 return self._json({"ok": ok, "message": msg}, 200 if ok else 400)
             if path == "/api/firewall/cloudflare":
                 ok, msg = firewall_cloudflare()
@@ -2184,6 +2286,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self._require():
             return
         return self._json({"ok": True, **firewall_status()})
+
+    def _api_fail2ban(self):
+        if not self._require():
+            return
+        return self._json({"ok": True, **fail2ban_status()})
 
     def _api_settings(self):
         if not self._require():
