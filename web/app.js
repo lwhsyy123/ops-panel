@@ -32,6 +32,10 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401) { location.href = '/login'; throw new Error('未登录'); }
   const data = await res.json().catch(() => ({ ok: false, error: '响应解析失败' }));
+  if (res.status === 403 && data.must_change_password) {
+    location.href = '/force-password';
+    throw new Error('请先修改初始密码');
+  }
   return data;
 }
 

@@ -101,6 +101,7 @@ def load_config(path):
     cfg.setdefault("bind", "127.0.0.1")
     cfg.setdefault("port", 9100)
     cfg.setdefault("max_upload_mb", 300)
+    cfg.setdefault("must_change_password", True)
     cfg.setdefault("totp_enabled", False)
     cfg.setdefault("totp_secret", "")
     cfg.setdefault("totp_recovery", [])
@@ -1694,6 +1695,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             self._json({"ok": False, "error": "未登录"}, 401)
             return False
+        if CFG.get("must_change_password") and self.path.split("?")[0] not in (
+                "/api/security", "/api/security/password"):
+            self._json({"ok": False, "error": "请先修改初始密码",
+                        "must_change_password": True}, 403)
+            return False
         return True
 
     # ---- 路由 ----
@@ -1705,7 +1711,13 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/", "/index.html"):
                 if not self._authed():
                     return self._redirect("/login")
+                if CFG.get("must_change_password"):
+                    return self._redirect("/force-password")
                 return self._file("index.html")
+            if path == "/force-password":
+                if not self._authed():
+                    return self._redirect("/login")
+                return self._file("force-password.html")
             if path == "/login":
                 if self._authed():
                     return self._redirect("/")
@@ -1860,7 +1872,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(302, b"", "text/plain", {"Location": loc})
 
     def _file(self, name):
-        if name not in ("index.html", "login.html", "app.js", "style.css"):
+        if name not in ("index.html", "login.html", "force-password.html", "app.js", "style.css"):
             return self._send(404, "not found", "text/plain; charset=utf-8")
         p = os.path.join(WEB_DIR, name)
         if not os.path.exists(p):
@@ -1896,7 +1908,9 @@ class Handler(BaseHTTPRequestHandler):
             FAILS.pop(ip, None)
         token = new_session()
         audit("login", "登录成功")
-        self._send(200, json.dumps({"ok": True}), headers={
+        self._send(200, json.dumps({"ok": True,
+                                    "must_change_password": bool(CFG.get("must_change_password"))}),
+                   headers={
             "Set-Cookie": "op_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d"
                           % (token, SESSION_TTL),
         })
@@ -2150,6 +2164,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(new_pw) < 8:
             return self._json({"ok": False, "error": "新密码至少 8 位"}, 400)
         CFG["password_hash"] = hash_password(new_pw)
+        CFG["must_change_password"] = False
         save_config()
         with SESS_LOCK:
             SESSIONS.clear()

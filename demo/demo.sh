@@ -210,6 +210,7 @@ cfg["audit_log"] = demo + "/logs/audit.log"
 cfg["systemd_dir"] = demo + "/systemd"
 cfg["default_owner"] = owner
 cfg["metrics_demo"] = True
+cfg["must_change_password"] = False
 cfg["nginx"].update({
     "bin": demo + "/fakebin/nginx",
     "sites_enabled": demo + "/sites-enabled",
