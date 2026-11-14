@@ -24,7 +24,7 @@ git init
 git add .
 git commit -m "ops-panel: nginx + systemd + deploy console"
 git branch -M main
-git remote add origin git@github.com:<your-name>/ops-panel.git
+git remote add origin git@github.com:lwhsyy123/ops-panel.git
 git push -u origin main
 ```
 
@@ -32,13 +32,13 @@ git push -u origin main
 
 ```bash
 apt update && apt install -y git
-OPS_PANEL_REPO=https://github.com/<your-name>/ops-panel.git bash bootstrap.sh
+OPS_PANEL_REPO=https://github.com/lwhsyy123/ops-panel.git bash bootstrap.sh
 ```
 
 或者不用 bootstrap：
 
 ```bash
-git clone --depth 1 https://github.com/<your-name>/ops-panel.git /opt/ops-panel-src
+git clone --depth 1 https://github.com/lwhsyy123/ops-panel.git /opt/ops-panel-src
 bash /opt/ops-panel-src/install.sh
 ```
 

@@ -88,14 +88,14 @@ config.example.json   配置模板（apps 为空，装好后用「发现」或�
 
 ```bash
 apt update && apt install -y git
-git clone --depth 1 https://github.com/<your-name>/ops-panel.git /opt/ops-panel-src
+git clone --depth 1 https://github.com/lwhsyy123/ops-panel.git /opt/ops-panel-src
 bash /opt/ops-panel-src/install.sh
 ```
 
 或者用 bootstrap（仓库地址用环境变量传）：
 
 ```bash
-OPS_PANEL_REPO=https://github.com/<your-name>/ops-panel.git bash bootstrap.sh
+OPS_PANEL_REPO=https://github.com/lwhsyy123/ops-panel.git bash bootstrap.sh
 ```
 
 **离线包**：
