@@ -1198,9 +1198,11 @@ def collect_metrics():
         out["net"] = {"rx_kbps": 120.5, "tx_kbps": 88.2}
         out["uptime_days"] = 26.4
     else:
-        a_cpu, a_rx, a_tx = _proc_cpu_sample(), _proc_net_sample()
+        a_cpu = _proc_cpu_sample()
+        a_rx, a_tx = _proc_net_sample()
         time.sleep(0.25)
-        b_cpu, b_rx, b_tx = _proc_cpu_sample(), _proc_net_sample()
+        b_cpu = _proc_cpu_sample()
+        b_rx, b_tx = _proc_net_sample()
         if a_cpu and b_cpu:
             delta = [b_cpu[i] - a_cpu[i] for i in range(min(len(a_cpu), len(b_cpu)))]
             total = sum(delta)
@@ -1906,13 +1908,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         services = [service_status(a["unit"]) for a in CFG["apps"]]
         disk = shutil.disk_usage("/")
+        try:
+            metrics = collect_metrics()
+        except Exception as e:
+            metrics = {"error": str(e)}
         return self._json({
             "ok": True,
             "services": services,
             "apps": [{"id": a["id"], "name": a["name"], "unit": a["unit"],
                       "path": a["path"], "url": a.get("url", "")} for a in CFG["apps"]],
             "nginx": {"active": nginx_status()},
-            "metrics": collect_metrics(),
+            "metrics": metrics,
             "disk": {"total": disk.total, "used": disk.used, "free": disk.free,
                      "percent": round(disk.used / disk.total * 100, 1)},
             "certs": list_certs(),
